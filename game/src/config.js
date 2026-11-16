@@ -62,6 +62,39 @@ export const CARRIER = {
   dropChance: 1,
 };
 
+export const STINGER = {
+  radius: 11,
+  hp: 1,
+  speed: 262,
+  homing: 66,
+  sway: 30,
+  swaySpeed: 5.2,
+  score: 80,
+  dropChance: 0.05,
+};
+
+/** The Dreadnought: a boss every fifth wave. hp grows past wave 5. */
+export const BOSS = {
+  radius: 74,
+  hp: 120,
+  hpPerWave: 12,
+  speed: 30,
+  hoverY: 122,
+  strafe: 300,
+  strafeSpeed: 0.45,
+  fireInterval: 1.55,
+  score: 2000,
+  trickleInterval: 2.0,
+  trickleMax: 4,
+};
+
+/** Kill chains: every 5 kills inside the window raise the score multiplier. */
+export const COMBO = {
+  window: 2.5,
+  perKill: 5,
+  max: 5,
+};
+
 export const POWERUP = {
   radius: 15,
   speed: 120,
@@ -92,6 +125,10 @@ export const PALETTE = {
   weaver: '#ff9f2e',
   carrier: '#ff4757',
   carrierCore: '#ffd32a',
+  stinger: '#3fd2ff',
+  boss: '#ff3860',
+  bossCore: '#ffe74c',
+  bossDark: '#7a1030',
   powerWeapon: '#ffe74c',
   powerRapid: '#3dffc8',
   powerShield: '#54a0ff',

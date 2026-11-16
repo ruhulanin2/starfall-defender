@@ -13,8 +13,8 @@ import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
 const START_SECONDS = 5;
 const PLAY_MIN_SECONDS = 16;
 const PLAY_LIMIT_SECONDS = 40;
-const BATTLE_MIN_SECONDS = 24;
-const BATTLE_LIMIT_SECONDS = 75;
+const BATTLE_MIN_SECONDS = 6;
+const BATTLE_LIMIT_SECONDS = 45;
 const END_LIMIT_SECONDS = 600;
 const IDLE = { mx: 0, my: 0, fire: false };
 
@@ -55,6 +55,27 @@ function goodPilot(state) {
   return { mx, my, fire: fire || state.enemies.length > 0 };
 }
 
+/** A boss-fight pilot: parks under the Dreadnought and pours fire into it, dodging as usual. */
+function bossPilot(state) {
+  const player = state.player;
+  if (!player || !player.alive) return IDLE;
+  const boss = state.enemies.find((e) => e.kind === 'boss');
+  if (!boss) return goodPilot(state);
+  let mx = clamp((boss.x - player.x) / 30);
+  for (const b of state.enemyBullets) {
+    if (b.vy > 0 && b.y < player.y && player.y - b.y < 280 && Math.abs(b.x - player.x) < 60) {
+      mx = b.x <= player.x ? 1 : -1;
+    }
+  }
+  for (const e of state.enemies) {
+    if (e.kind !== 'boss' && e.y < player.y && player.y - e.y < 110 && Math.abs(e.x - player.x) < 54) {
+      mx = e.x <= player.x ? 1 : -1;
+    }
+  }
+  const my = clamp((620 - player.y) / 30);
+  return { mx, my, fire: true };
+}
+
 /** A careless pilot: drifts to the middle, fires only at what is right overhead, never dodges. */
 function weakPilot(state) {
   const player = state.player;
@@ -79,27 +100,65 @@ function settleBlink(world, attract) {
  */
 export function stageShot(name, world) {
   world.reset();
-  if (name === 'play' || name === 'battle') {
+  if (name === 'battle') {
+    // The cover scene: a live Dreadnought boss fight. Play the boss wave
+    // forward and keep the single best frame — boss still strong, escorts
+    // around it, both sides firing — rather than the first passable one:
+    // the pilot is accurate enough that the fight turns fast. If the pilot
+    // falls before any good frame, restage once with a shield.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      world.reset();
+      world.state.wave = 4; // the first wave staged is wave 5: the boss wave
+      world.state.score = 2600; // waves 1-4 already cleared to reach the boss
+      world.state.player.weapon = 3;
+      if (attempt === 1) world.state.player.shield = 12;
+      let bestSnap = null;
+      let bestScore = -1;
+      const limitSteps = BATTLE_LIMIT_SECONDS / STEP;
+      const minSteps = BATTLE_MIN_SECONDS / STEP;
+      for (let i = 0; i < limitSteps; i += 1) {
+        const events = world.step(STEP, bossPilot(world.state), false);
+        const s = world.state;
+        const boss = s.enemies.find((e) => e.kind === 'boss');
+        if (boss && !s.over && s.banner.t <= 0 && i >= minSteps) {
+          const frameScore = (boss.hp / boss.maxHp) * 30
+            + Math.min(s.enemyBullets.length, 14) * 2.5
+            + Math.min(s.bullets.length, 14)
+            + (s.enemies.length - 1) * 6
+            + Math.min(s.particles.length, 30) * 0.3
+            + s.powerups.length * 4;
+          if (frameScore > bestScore) {
+            bestScore = frameScore;
+            bestSnap = structuredClone(s);
+          }
+        }
+        if (events & EVENT_OVER) break;
+        if (!boss && bestSnap && i >= minSteps) break; // boss destroyed — the best frame is behind us
+      }
+      if (bestSnap) {
+        Object.assign(world.state, bestSnap);
+        return { screen: SCREEN_PLAY, best: world.state.score };
+      }
+    }
+    return { screen: SCREEN_PLAY, best: world.state.score };
+  }
+  if (name === 'play') {
     // Play forward, then hold on the first dense mid-action frame: enough
     // enemies on screen, shots in the air and no wave banner in the way.
     // A fixed end time too often lands in the lull between waves.
-    const battle = name === 'battle';
-    if (battle) world.state.player.weapon = 2;
-    const minSteps = (battle ? BATTLE_MIN_SECONDS : PLAY_MIN_SECONDS) / STEP;
-    const limitSteps = (battle ? BATTLE_LIMIT_SECONDS : PLAY_LIMIT_SECONDS) / STEP;
-    const minEnemies = battle ? 6 : 5;
-    const minBullets = battle ? 4 : 0;
+    const minSteps = PLAY_MIN_SECONDS / STEP;
+    const limitSteps = PLAY_LIMIT_SECONDS / STEP;
     for (let i = 0; i < limitSteps; i += 1) {
       if (world.step(STEP, goodPilot(world.state), false) & EVENT_OVER) break;
       const s = world.state;
       if (i >= minSteps && !s.over && s.banner.t <= 0
-        && onScreen(s) >= minEnemies && s.bullets.length >= minBullets) break;
+        && onScreen(s) >= 5 && s.bullets.length >= 0) break;
     }
     return { screen: world.state.over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
   }
   if (name === 'end') {
-    world.state.wave = 4; // the first wave staged is wave 5: fast, dense, lethal
-    world.state.score = 2350; // a good run behind it — this is the moment it ends
+    world.state.wave = 4; // the first wave staged is wave 5: the boss wave ends it
+    world.state.score = 3200; // a good run behind it — this is the moment it ends
     world.state.player.weapon = 2;
     for (let i = 0; i < END_LIMIT_SECONDS / STEP; i += 1) {
       if (world.step(STEP, weakPilot(world.state), false) & EVENT_OVER) break;

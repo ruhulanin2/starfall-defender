@@ -212,6 +212,98 @@ export function createRenderer(canvas) {
     }
   }
 
+  function drawStinger(e) {
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    ctx.rotate(Math.sin(e.t * 5.2 + e.phase) * 0.18);
+    ctx.beginPath();
+    ctx.moveTo(0, 15);
+    ctx.lineTo(6, 2);
+    ctx.lineTo(11, -9);
+    ctx.lineTo(3, -6);
+    ctx.lineTo(0, -13);
+    ctx.lineTo(-3, -6);
+    ctx.lineTo(-11, -9);
+    ctx.lineTo(-6, 2);
+    ctx.closePath();
+    ctx.fillStyle = PALETTE.stinger;
+    ctx.shadowColor = PALETTE.stinger;
+    ctx.shadowBlur = 12;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(0, 0, 3.4, 0, Math.PI * 2);
+    ctx.fillStyle = '#eafcff';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawBoss(e, state) {
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    // Side pods
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(side * 46, -18);
+      ctx.lineTo(side * 96, 2);
+      ctx.lineTo(side * 88, 34);
+      ctx.lineTo(side * 48, 26);
+      ctx.closePath();
+      ctx.fillStyle = PALETTE.bossDark;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(side * 62, 22, 7, 0, Math.PI * 2);
+      ctx.fillStyle = PALETTE.bossCore;
+      ctx.shadowColor = PALETTE.bossCore;
+      ctx.shadowBlur = 10;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    // Main hull
+    ctx.beginPath();
+    ctx.moveTo(-58, -34);
+    ctx.lineTo(-24, -52);
+    ctx.lineTo(24, -52);
+    ctx.lineTo(58, -34);
+    ctx.lineTo(50, 26);
+    ctx.lineTo(20, 44);
+    ctx.lineTo(-20, 44);
+    ctx.lineTo(-50, 26);
+    ctx.closePath();
+    const hull = ctx.createLinearGradient(0, -52, 0, 44);
+    hull.addColorStop(0, '#ff7a9c');
+    hull.addColorStop(0.4, PALETTE.boss);
+    hull.addColorStop(1, PALETTE.bossDark);
+    ctx.fillStyle = hull;
+    ctx.shadowColor = PALETTE.boss;
+    ctx.shadowBlur = 22;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    // Armour seams
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-40, -8);
+    ctx.lineTo(40, -8);
+    ctx.moveTo(-30, 18);
+    ctx.lineTo(30, 18);
+    ctx.stroke();
+    // Pulsing core
+    const pulse = 15 + Math.sin(state.time * 4.4 + e.phase) * 3;
+    ctx.beginPath();
+    ctx.arc(0, 2, pulse, 0, Math.PI * 2);
+    ctx.fillStyle = PALETTE.bossCore;
+    ctx.shadowColor = PALETTE.bossCore;
+    ctx.shadowBlur = 18;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(0, 2, pulse * 0.45, 0, Math.PI * 2);
+    ctx.fillStyle = '#fffbe8';
+    ctx.fill();
+    ctx.restore();
+  }
+
   function drawPowerup(p, state) {
     const colors = {
       weapon: PALETTE.powerWeapon, rapid: PALETTE.powerRapid,
@@ -246,6 +338,8 @@ export function createRenderer(canvas) {
     for (const e of state.enemies) {
       if (e.kind === 'drone') drawDrone(e);
       else if (e.kind === 'weaver') drawWeaver(e);
+      else if (e.kind === 'stinger') drawStinger(e);
+      else if (e.kind === 'boss') drawBoss(e, state);
       else drawCarrier(e, state);
     }
     // Enemy bullets
@@ -308,6 +402,24 @@ export function createRenderer(canvas) {
     }
     const swarmLeft = state.enemies.length + state.spawnQueue.length;
     text(`SWARM LEFT ${swarmLeft}`, 26, 94, 16, PALETTE.muted, 'left', 700);
+    if (state.combo && state.combo.mult > 1) {
+      text(`COMBO x${state.combo.mult}`, 26, 120, 19, PALETTE.accent, 'left', 800);
+    }
+    // Boss health bar across the top centre
+    const boss = state.enemies.find((e) => e.kind === 'boss');
+    if (boss && boss.maxHp) {
+      const w = 420;
+      const x = FIELD.width / 2 - w / 2;
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(x, 48, w, 12);
+      ctx.fillStyle = PALETTE.boss;
+      ctx.shadowColor = PALETTE.boss;
+      ctx.shadowBlur = 8;
+      ctx.fillRect(x, 48, w * Math.max(0, boss.hp / boss.maxHp), 12);
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
     const p = state.player;
     if (p) {
       const chips = [];
@@ -342,8 +454,9 @@ export function createRenderer(canvas) {
     ctx.shadowBlur = 0;
     ctx.restore();
     text('D E F E N D E R', FIELD.width / 2, 316, 40, PALETTE.accent, 'center', 800);
-    text('Hold the line against the swarm. Catch falling cores to power up your cannon.', FIELD.width / 2, 386, 21, PALETTE.text);
-    text('Move: WASD / Arrow keys / Drag      Fire: Space / Hold pointer', FIELD.width / 2, 428, 19, PALETTE.muted);
+    text('Hold the line against the swarm. Chain kills for combo multipliers,', FIELD.width / 2, 380, 21, PALETTE.text);
+    text('catch falling cores to power up — and bring down the Dreadnought every 5th wave.', FIELD.width / 2, 408, 21, PALETTE.text);
+    text('Move: WASD / Arrow keys / Drag      Fire: Space / Hold pointer', FIELD.width / 2, 442, 19, PALETTE.muted);
     if (Math.floor(state.time * 1.6) % 2 === 0) {
       text('PRESS ENTER OR CLICK TO START', FIELD.width / 2, 502, 26, '#ffffff', 'center', 800);
     }
@@ -357,7 +470,7 @@ export function createRenderer(canvas) {
     ctx.restore();
     text('GAME OVER', FIELD.width / 2, 252, 68, PALETTE.danger, 'center', 800);
     text(`SCORE ${state.score}`, FIELD.width / 2, 336, 34, PALETTE.text, 'center', 800);
-    const rank = state.score >= 6000 ? 'S' : state.score >= 3500 ? 'A' : state.score >= 1800 ? 'B' : state.score >= 800 ? 'C' : 'D';
+    const rank = state.score >= 9000 ? 'S' : state.score >= 5500 ? 'A' : state.score >= 2800 ? 'B' : state.score >= 1200 ? 'C' : 'D';
     text(`RANK ${rank} — WAVE ${Math.max(1, state.wave)} REACHED`, FIELD.width / 2, 380, 21, PALETTE.accent);
     if (state.score >= best && state.score > 0) text('NEW BEST!', FIELD.width / 2, 424, 24, PALETTE.accent, 'center', 800);
     else text(`BEST ${best}`, FIELD.width / 2, 424, 21, PALETTE.muted);

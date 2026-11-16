@@ -3,7 +3,8 @@
 // same seed and the same controls always produce the same game (which is
 // what makes the staged screenshot scenes repeatable).
 import {
-  BULLET, CARRIER, DRONE, FIELD, LIVES, PLAYER, POWERUP, WAVE, WEAVER,
+  BOSS, BULLET, CARRIER, COMBO, DRONE, FIELD, LIVES, PLAYER, POWERUP,
+  STINGER, WAVE, WEAVER,
 } from './config.js';
 
 export const EVENT_HIT = 1;
@@ -12,7 +13,7 @@ export const EVENT_SHIELD = 4;
 export const EVENT_POWER = 8;
 export const EVENT_WAVE = 16;
 
-const ENEMY_STATS = { drone: DRONE, weaver: WEAVER, carrier: CARRIER };
+const ENEMY_STATS = { drone: DRONE, weaver: WEAVER, carrier: CARRIER, stinger: STINGER, boss: BOSS };
 
 export function createWorld(random) {
   const state = {
@@ -37,6 +38,8 @@ export function createWorld(random) {
     flash: 0,
     dropIndex: 0,
     attractSpawn: 0,
+    combo: { n: 0, t: 0, mult: 1 },
+    bossTimer: 0,
   };
 
   function freshPlayer() {
@@ -68,6 +71,8 @@ export function createWorld(random) {
     state.flash = 0;
     state.dropIndex = 0;
     state.attractSpawn = 0;
+    state.combo = { n: 0, t: 0, mult: 1 };
+    state.bossTimer = 0;
   }
 
   function burst(x, y, color, count, speed) {
@@ -86,13 +91,20 @@ export function createWorld(random) {
     state.floaters.push({ x, y, text, color, t: 0 });
   }
 
+  function isBossWave(n) {
+    return n % 5 === 0;
+  }
+
   function buildWave(n) {
+    if (isBossWave(n)) return ['boss'];
     const queue = [];
     const drones = 6 + n * 2;
     const weavers = n >= 2 ? (n - 1) * 2 : 0;
+    const stingers = n >= 2 ? (n - 1) * 2 : 0;
     const carriers = n >= 3 ? Math.floor((n + 1) / 3) : 0;
     for (let i = 0; i < drones; i += 1) queue.push('drone');
     for (let i = 0; i < weavers; i += 1) queue.splice(Math.floor(random() * (queue.length + 1)), 0, 'weaver');
+    for (let i = 0; i < stingers; i += 1) queue.splice(Math.floor(random() * (queue.length + 1)), 0, 'stinger');
     for (let i = 0; i < carriers; i += 1) queue.splice(Math.floor(queue.length * (0.3 + 0.4 * random())), 0, 'carrier');
     return queue;
   }
@@ -102,16 +114,27 @@ export function createWorld(random) {
     state.spawnQueue = buildWave(state.wave);
     state.spawnTimer = 0.2;
     state.waveState = 'spawning';
-    state.banner = { text: `WAVE ${state.wave}`, t: 1.8 };
+    state.bossTimer = BOSS.trickleInterval;
+    state.banner = isBossWave(state.wave)
+      ? { text: '⚠ DREADNOUGHT ⚠', t: 2.2 }
+      : { text: `WAVE ${state.wave}`, t: 1.8 };
   }
 
   function spawnEnemy(kind) {
     const stats = ENEMY_STATS[kind];
+    if (kind === 'boss') {
+      const hp = BOSS.hp + (state.wave - 5) * BOSS.hpPerWave;
+      state.enemies.push({
+        kind, x: FIELD.width / 2, baseX: FIELD.width / 2, y: -BOSS.radius - 10,
+        hp, maxHp: hp, t: 0, phase: random() * Math.PI * 2, fireTimer: 2.2, shots: 0,
+      });
+      return;
+    }
     const x = 70 + random() * (FIELD.width - 140);
     state.enemies.push({
       kind, x, baseX: x, y: -stats.radius - 6, hp: stats.hp, t: 0,
       phase: random() * Math.PI * 2,
-      fireTimer: 1 + random() * stats.fireInterval || 0,
+      fireTimer: stats.fireInterval ? 1 + random() * stats.fireInterval : 0,
     });
   }
 
@@ -129,16 +152,44 @@ export function createWorld(random) {
   function killEnemy(enemy, index, scored) {
     const stats = ENEMY_STATS[enemy.kind];
     state.enemies.splice(index, 1);
-    burst(enemy.x, enemy.y, enemy.kind === 'drone' ? '#ff4fd8' : enemy.kind === 'weaver' ? '#ff9f2e' : '#ff4757', enemy.kind === 'carrier' ? 30 : 16, 260);
+    const color = enemy.kind === 'drone' ? '#ff4fd8'
+      : enemy.kind === 'weaver' ? '#ff9f2e'
+        : enemy.kind === 'stinger' ? '#3fd2ff'
+          : enemy.kind === 'boss' ? '#ff3860' : '#ff4757';
+    if (enemy.kind === 'boss') {
+      burst(enemy.x, enemy.y, '#ff3860', 46, 340);
+      burst(enemy.x, enemy.y, '#ffd32a', 30, 260);
+      burst(enemy.x, enemy.y, '#ffffff', 16, 200);
+      state.shake = 15;
+      state.flash = 0.3;
+    } else {
+      burst(enemy.x, enemy.y, color, enemy.kind === 'carrier' ? 30 : 16, 260);
+    }
     if (scored) {
-      state.score += stats.score;
-      floater(enemy.x, enemy.y, `+${stats.score}`, '#cfe9ff');
-      if (random() < stats.dropChance || enemy.kind === 'carrier') dropPowerup(enemy.x, enemy.y, enemy.kind === 'carrier');
+      // Combo chain: kills inside the window raise the multiplier.
+      const combo = state.combo;
+      combo.n += 1;
+      combo.t = COMBO.window;
+      const mult = Math.min(COMBO.max, 1 + Math.floor(combo.n / COMBO.perKill));
+      if (mult > combo.mult) {
+        combo.mult = mult;
+        floater(state.player.x, state.player.y - 46, `COMBO x${mult}`, '#ffe74c');
+      }
+      const gained = stats.score * combo.mult;
+      state.score += gained;
+      floater(enemy.x, enemy.y, combo.mult > 1 ? `+${gained}` : `+${stats.score}`, '#cfe9ff');
+      if (enemy.kind === 'boss') {
+        dropPowerup(enemy.x - 40, enemy.y + 10, true);
+        dropPowerup(enemy.x + 40, enemy.y + 10, true);
+      } else if (random() < stats.dropChance || enemy.kind === 'carrier') {
+        dropPowerup(enemy.x, enemy.y, enemy.kind === 'carrier');
+      }
     }
   }
 
   function hitPlayer(events) {
     const player = state.player;
+    state.combo = { n: 0, t: 0, mult: 1 };
     if (player.shield > 0) {
       player.shield = 0;
       player.invuln = Math.max(player.invuln, 1.2);
@@ -194,6 +245,44 @@ export function createWorld(random) {
           vx: Math.sin(spread) * BULLET.enemySpeed, vy: Math.cos(spread) * BULLET.enemySpeed,
         });
       }
+    } else if (enemy.kind === 'boss') {
+      enemy.shots += 1;
+      const speed = BULLET.enemySpeed * 1.05;
+      const pattern = enemy.shots % 3;
+      if (pattern === 1) {
+        // Aimed triple-spread from the core.
+        const dx = player.x - enemy.x;
+        const dy = player.y - enemy.y;
+        const base = Math.atan2(dy, dx);
+        for (const off of [-0.22, 0, 0.22]) {
+          state.enemyBullets.push({
+            x: enemy.x, y: enemy.y + 30,
+            vx: Math.cos(base + off) * speed, vy: Math.sin(base + off) * speed,
+          });
+        }
+      } else if (pattern === 2) {
+        // Rotating radial ring.
+        const offset = enemy.shots * 0.35;
+        for (let i = 0; i < 10; i += 1) {
+          const a = offset + (i / 10) * Math.PI * 2;
+          state.enemyBullets.push({
+            x: enemy.x, y: enemy.y + 10,
+            vx: Math.cos(a) * speed * 0.8, vy: Math.sin(a) * speed * 0.8,
+          });
+        }
+      } else {
+        // Twin pod volleys straight down plus one aimed shot.
+        for (const px of [-52, 52]) {
+          state.enemyBullets.push({ x: enemy.x + px, y: enemy.y + 34, vx: 0, vy: speed * 1.15 });
+        }
+        const dx = player.x - enemy.x;
+        const dy = player.y - enemy.y;
+        const len = Math.hypot(dx, dy) || 1;
+        state.enemyBullets.push({
+          x: enemy.x, y: enemy.y + 30,
+          vx: (dx / len) * speed, vy: (dy / len) * speed,
+        });
+      }
     }
   }
 
@@ -237,6 +326,10 @@ export function createWorld(random) {
     if (state.banner.t > 0) state.banner.t -= dt;
     if (state.shake > 0) state.shake = Math.max(0, state.shake - dt * 26);
     if (state.flash > 0) state.flash = Math.max(0, state.flash - dt);
+    if (state.combo.t > 0) {
+      state.combo.t -= dt;
+      if (state.combo.t <= 0) state.combo = { n: 0, t: 0, mult: 1 };
+    }
     if (attract) return stepAttract(dt);
     if (state.over) { updateFx(dt); return 0; }
 
@@ -255,11 +348,23 @@ export function createWorld(random) {
         state.spawnTimer = interval * (0.6 + random() * 0.7);
       }
       if (state.spawnQueue.length === 0) state.waveState = 'fighting';
-    } else if (state.waveState === 'fighting' && state.enemies.length === 0) {
-      state.waveState = 'gap';
-      state.gapTimer = WAVE.gap;
-      state.score += 100;
-      floater(FIELD.width / 2, 300, 'WAVE CLEAR  +100', '#ffe74c');
+    } else if (state.waveState === 'fighting') {
+      // During a boss fight the Dreadnought keeps launching escort drones.
+      const boss = state.enemies.find((e) => e.kind === 'boss');
+      if (boss && boss.y > 0) {
+        state.bossTimer -= dt;
+        const escorts = state.enemies.length - 1;
+        if (state.bossTimer <= 0 && escorts < BOSS.trickleMax) {
+          spawnEnemy('drone');
+          state.bossTimer = BOSS.trickleInterval;
+        }
+      }
+      if (state.enemies.length === 0) {
+        state.waveState = 'gap';
+        state.gapTimer = WAVE.gap;
+        state.score += 100;
+        floater(FIELD.width / 2, 300, 'WAVE CLEAR  +100', '#ffe74c');
+      }
     }
 
     // Player
@@ -317,13 +422,21 @@ export function createWorld(random) {
       } else if (e.kind === 'weaver') {
         e.y += WEAVER.speed * dt;
         e.x = e.baseX + Math.sin(e.t * WEAVER.swaySpeed + e.phase) * WEAVER.sway;
-      } else {
+      } else if (e.kind === 'stinger') {
+        e.y += STINGER.speed * dt;
+        const drift = player.alive ? Math.max(-1, Math.min(1, (player.x - e.x) / 120)) * STINGER.homing : 0;
+        e.x += drift * dt + Math.sin(e.t * STINGER.swaySpeed + e.phase) * STINGER.sway * dt;
+      } else if (e.kind === 'carrier') {
         e.y += CARRIER.speed * dt;
         e.x = e.baseX + Math.sin(e.t * 0.7 + e.phase) * 26;
+      } else if (e.kind === 'boss') {
+        if (e.y < BOSS.hoverY) e.y += BOSS.speed * dt;
+        e.x = FIELD.width / 2 + Math.sin(e.t * BOSS.strafeSpeed + e.phase) * BOSS.strafe;
       }
       e.x = Math.min(FIELD.width - 40, Math.max(40, e.x));
       if (e.y > FIELD.height + 60) { state.enemies.splice(i, 1); continue; }
-      if (e.kind !== 'drone' && player.alive && e.y > 10 && e.y < FIELD.height * 0.75) {
+      const canFire = e.kind === 'weaver' || e.kind === 'carrier' || e.kind === 'boss';
+      if (canFire && player.alive && e.y > 10 && e.y < FIELD.height * 0.85) {
         e.fireTimer -= dt;
         if (e.fireTimer <= 0) {
           enemyShoot(e);
