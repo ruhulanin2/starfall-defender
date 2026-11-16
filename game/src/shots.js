@@ -11,10 +11,17 @@ import { EVENT_OVER } from './world.js';
 import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
 
 const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const BATTLE_SECONDS = 48;
+const PLAY_MIN_SECONDS = 16;
+const PLAY_LIMIT_SECONDS = 40;
+const BATTLE_MIN_SECONDS = 24;
+const BATTLE_LIMIT_SECONDS = 75;
 const END_LIMIT_SECONDS = 600;
 const IDLE = { mx: 0, my: 0, fire: false };
+
+/** Enemies actually visible in the frame (not still above the top edge). */
+function onScreen(state) {
+  return state.enemies.filter((e) => e.y > 0 && e.y < FIELD.height).length;
+}
 
 function clamp(v) { return Math.max(-1, Math.min(1, v)); }
 
@@ -29,7 +36,7 @@ function goodPilot(state) {
   let mx = target ? clamp((target.x - player.x) / 30) : clamp((FIELD.width / 2 - player.x) / 40);
   // Dodge incoming bolts
   for (const b of state.enemyBullets) {
-    if (b.vy > 0 && b.y < player.y && player.y - b.y < 200 && Math.abs(b.x - player.x) < 48) {
+    if (b.vy > 0 && b.y < player.y && player.y - b.y < 280 && Math.abs(b.x - player.x) < 60) {
       mx = b.x <= player.x ? 1 : -1;
     }
   }
@@ -73,15 +80,27 @@ function settleBlink(world, attract) {
 export function stageShot(name, world) {
   world.reset();
   if (name === 'play' || name === 'battle') {
-    if (name === 'battle') world.state.player.weapon = 2;
-    const seconds = name === 'play' ? PLAY_SECONDS : BATTLE_SECONDS;
-    for (let i = 0; i < seconds / STEP; i += 1) {
+    // Play forward, then hold on the first dense mid-action frame: enough
+    // enemies on screen, shots in the air and no wave banner in the way.
+    // A fixed end time too often lands in the lull between waves.
+    const battle = name === 'battle';
+    if (battle) world.state.player.weapon = 2;
+    const minSteps = (battle ? BATTLE_MIN_SECONDS : PLAY_MIN_SECONDS) / STEP;
+    const limitSteps = (battle ? BATTLE_LIMIT_SECONDS : PLAY_LIMIT_SECONDS) / STEP;
+    const minEnemies = battle ? 6 : 5;
+    const minBullets = battle ? 4 : 0;
+    for (let i = 0; i < limitSteps; i += 1) {
       if (world.step(STEP, goodPilot(world.state), false) & EVENT_OVER) break;
+      const s = world.state;
+      if (i >= minSteps && !s.over && s.banner.t <= 0
+        && onScreen(s) >= minEnemies && s.bullets.length >= minBullets) break;
     }
     return { screen: world.state.over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
   }
   if (name === 'end') {
     world.state.wave = 4; // the first wave staged is wave 5: fast, dense, lethal
+    world.state.score = 2350; // a good run behind it — this is the moment it ends
+    world.state.player.weapon = 2;
     for (let i = 0; i < END_LIMIT_SECONDS / STEP; i += 1) {
       if (world.step(STEP, weakPilot(world.state), false) & EVENT_OVER) break;
     }
