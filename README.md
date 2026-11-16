@@ -9,10 +9,19 @@ code: the starfighter, the swarm, the nebulae, even the sounds.
 Waves of swarm ships are falling toward your line:
 
 - **Drones** — fast magenta darts that sway as they dive. 50 points.
+- **Stingers** — small cyan hunters that dive fast and drift toward your
+  ship. 80 points.
 - **Weavers** — orange gunners that snake across the sky and fire aimed
   bolts. 100 points.
 - **Carriers** — heavy red hulls with a glowing core, triple-shot spreads
   and a big health pool. 300 points, and they always drop a power core.
+- **The Dreadnought** — every 5th wave a capital ship with a pulsing core
+  takes the field: aimed spreads, rotating bullet rings and twin pod
+  volleys, launching drone escorts while it fights. 2,000 points and a
+  shower of power cores when it falls.
+
+Kills chain into **combos**: every 5 kills inside a short window raise your
+score multiplier, up to x5 — get hit and the chain breaks.
 
 Shot-down ships drop **power cores**. Fly into one to collect it:
 
